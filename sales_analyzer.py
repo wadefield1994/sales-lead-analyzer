@@ -460,6 +460,7 @@ def main():
     )
     
     st.title("🎯 销售线索分析工具")
+    st.markdown("### 📅 最后更新：2025年8月8日 - 新增功能演示")
     st.markdown("---")
     
     analyzer = SalesAnalyzer()
