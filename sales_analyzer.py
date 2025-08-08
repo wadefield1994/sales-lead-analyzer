@@ -251,6 +251,99 @@ def show_channel_analysis(analyzer):
             )
             fig.update_layout(yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig, use_container_width=True)
+    
+    # 渠道-销售分配分析
+    st.subheader("🔄 渠道线索分配分析")
+    st.markdown("分析不同渠道的线索都分给了哪些销售，以及各销售在不同渠道的表现")
+    
+    # 创建渠道-销售交叉分析表
+    channel_sales_pivot = data.pivot_table(
+        index='学员来源',
+        columns='所属销售',
+        values='学员id',
+        aggfunc='count',
+        fill_value=0
+    )
+    
+    # 只显示线索数较多的渠道和销售
+    top_channels = data['学员来源'].value_counts().head(5).index
+    top_sales = data['所属销售'].value_counts().head(10).index
+    
+    filtered_pivot = channel_sales_pivot.loc[top_channels, top_sales]
+    
+    # 显示热力图
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        fig = px.imshow(
+            filtered_pivot.values,
+            x=filtered_pivot.columns,
+            y=filtered_pivot.index,
+            aspect="auto",
+            title="渠道-销售线索分配热力图 (TOP5渠道 × TOP10销售)",
+            labels=dict(x="销售人员", y="线索来源", color="线索数量")
+        )
+        fig.update_xaxes(tickangle=45)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        # 选择特定渠道查看详细分配
+        selected_channel = st.selectbox(
+            "选择渠道查看详细分配:",
+            options=top_channels,
+            key="channel_select"
+        )
+        
+        if selected_channel:
+            channel_detail = data[data['学员来源'] == selected_channel].groupby('所属销售').agg({
+                '学员id': 'count',
+                '是否报名': 'sum'
+            })
+            channel_detail['转化率(%)'] = (channel_detail['是否报名'] / channel_detail['学员id'] * 100).round(2)
+            channel_detail.columns = ['线索数', '报名数', '转化率(%)']
+            channel_detail = channel_detail.sort_values('线索数', ascending=False).head(10)
+            
+            st.markdown(f"**{selected_channel}** 渠道分配详情:")
+            st.dataframe(channel_detail, use_container_width=True)
+    
+    # 销售在不同渠道的表现对比
+    st.subheader("👤 销售人员跨渠道表现分析")
+    
+    # 选择销售人员
+    top_sales_list = data['所属销售'].value_counts().head(8).index.tolist()
+    selected_sales = st.selectbox(
+        "选择销售人员查看跨渠道表现:",
+        options=top_sales_list,
+        key="sales_select"
+    )
+    
+    if selected_sales:
+        sales_channel_stats = data[data['所属销售'] == selected_sales].groupby('学员来源').agg({
+            '学员id': 'count',
+            '是否报名': 'sum',
+            '回访次数': 'mean'
+        }).round(2)
+        
+        sales_channel_stats['转化率(%)'] = (sales_channel_stats['是否报名'] / sales_channel_stats['学员id'] * 100).round(2)
+        sales_channel_stats.columns = ['线索数', '报名数', '平均回访次数', '转化率(%)']
+        sales_channel_stats = sales_channel_stats[sales_channel_stats['线索数'] >= 3].sort_values('转化率(%)', ascending=False)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown(f"**{selected_sales}** 在各渠道的表现:")
+            st.dataframe(sales_channel_stats, use_container_width=True)
+        
+        with col2:
+            if len(sales_channel_stats) > 0:
+                fig = px.bar(
+                    x=sales_channel_stats.index,
+                    y=sales_channel_stats['转化率(%)'],
+                    title=f"{selected_sales} 各渠道转化率对比",
+                    labels={'x': '渠道', 'y': '转化率(%)'}
+                )
+                fig.update_xaxes(tickangle=45)
+                st.plotly_chart(fig, use_container_width=True)
 
 def show_sales_team_analysis(analyzer):
     """销售团队分析"""
