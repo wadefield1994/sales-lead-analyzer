@@ -74,19 +74,23 @@ class SalesAnalyzer:
         if self.data is None:
             return pd.DataFrame()
         
-        # 按渠道统计基础数据
-        channel_stats = self.data.groupby('学员来源').agg({
-            '学员id': 'count',
-            '是否报名': 'sum',
-            '报名金额': 'sum',
-            '回访次数': 'mean',
-            '客户分级': lambda x: (x.isin(['A', 'B'])).sum()  # 高质量线索数
-        }).round(2)
+        try:
+            # 按渠道统计基础数据
+            channel_stats = self.data.groupby('学员来源').agg({
+                '学员id': 'count',
+                '是否报名': 'sum',
+                '报名金额': 'sum',
+                '回访次数': 'mean',
+                '客户分级': lambda x: (x.isin(['A', 'B'])).sum()  # 高质量线索数
+            }).round(2)
+        except Exception as e:
+            st.error(f"渠道优先级计算错误: {str(e)}")
+            return pd.DataFrame()
         
         # 计算各项指标
-        channel_stats['转化率'] = (channel_stats['是否报名'] / channel_stats['学员id'] * 100).round(2)
+        channel_stats['转化率'] = (channel_stats['是否报名'] / channel_stats['学员id'] * 100).fillna(0).round(2)
         channel_stats['平均客单价'] = (channel_stats['报名金额'] / channel_stats['是否报名']).fillna(0).round(2)
-        channel_stats['高质量线索率'] = (channel_stats['客户分级'] / channel_stats['学员id'] * 100).round(2)
+        channel_stats['高质量线索率'] = (channel_stats['客户分级'] / channel_stats['学员id'] * 100).fillna(0).round(2)
         
         # 计算优先级评分 (满分100分)
         # 转化率权重40%，平均客单价权重30%，高质量线索率权重20%，线索数量权重10%
@@ -151,15 +155,19 @@ class SalesAnalyzer:
         if self.data is None:
             return pd.DataFrame()
         
-        # 按销售人员统计基础数据
-        sales_stats = self.data.groupby('所属销售').agg({
-            '学员id': 'count',
-            '是否报名': 'sum',
-            '报名金额': 'sum',
-            '回访次数': 'mean',
-            '跟进天数': 'mean',
-            '客户分级': lambda x: (x.isin(['A', 'B'])).sum()  # 高质量线索数
-        }).round(2)
+        try:
+            # 按销售人员统计基础数据
+            sales_stats = self.data.groupby('所属销售').agg({
+                '学员id': 'count',
+                '是否报名': 'sum',
+                '报名金额': 'sum',
+                '回访次数': 'mean',
+                '跟进天数': 'mean',
+                '客户分级': lambda x: (x.isin(['A', 'B'])).sum()  # 高质量线索数
+            }).round(2)
+        except Exception as e:
+            st.error(f"销售优先级计算错误: {str(e)}")
+            return pd.DataFrame()
         
         # 只分析线索数>=10的销售
         sales_stats = sales_stats[sales_stats['学员id'] >= 10]
@@ -168,12 +176,12 @@ class SalesAnalyzer:
             return pd.DataFrame()
         
         # 计算各项指标
-        sales_stats['转化率'] = (sales_stats['是否报名'] / sales_stats['学员id'] * 100).round(2)
+        sales_stats['转化率'] = (sales_stats['是否报名'] / sales_stats['学员id'] * 100).fillna(0).round(2)
         sales_stats['平均客单价'] = (sales_stats['报名金额'] / sales_stats['是否报名']).fillna(0).round(2)
-        sales_stats['高质量线索率'] = (sales_stats['客户分级'] / sales_stats['学员id'] * 100).round(2)
+        sales_stats['高质量线索率'] = (sales_stats['客户分级'] / sales_stats['学员id'] * 100).fillna(0).round(2)
         
         # 计算处理效率指标（跟进天数越少越好，回访次数适中最好）
-        sales_stats['跟进效率'] = (1 / (sales_stats['跟进天数'] + 1) * 100).round(2)  # 转换为正向指标
+        sales_stats['跟进效率'] = (1 / (sales_stats['跟进天数'].fillna(1) + 1) * 100).round(2)  # 转换为正向指标
         sales_stats['回访效率'] = (100 - abs(sales_stats['回访次数'] - 3) * 10).clip(0, 100).round(2)  # 3次回访为最佳
         
         # 计算优先级评分 (满分100分)
