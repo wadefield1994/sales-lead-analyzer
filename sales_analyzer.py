@@ -145,6 +145,97 @@ class SalesAnalyzer:
         channel_stats.columns = ['线索数', '报名数', '总收入', '转化率(%)', '建议权重(%)', '调整建议']
         
         return channel_stats.sort_values('建议权重(%)', ascending=False)
+    
+    def calculate_sales_priority(self):
+        """计算销售人员优先级评分"""
+        if self.data is None:
+            return pd.DataFrame()
+        
+        # 按销售人员统计基础数据
+        sales_stats = self.data.groupby('所属销售').agg({
+            '学员id': 'count',
+            '是否报名': 'sum',
+            '报名金额': 'sum',
+            '回访次数': 'mean',
+            '跟进天数': 'mean',
+            '客户分级': lambda x: (x.isin(['A', 'B'])).sum()  # 高质量线索数
+        }).round(2)
+        
+        # 只分析线索数>=10的销售
+        sales_stats = sales_stats[sales_stats['学员id'] >= 10]
+        
+        if sales_stats.empty:
+            return pd.DataFrame()
+        
+        # 计算各项指标
+        sales_stats['转化率'] = (sales_stats['是否报名'] / sales_stats['学员id'] * 100).round(2)
+        sales_stats['平均客单价'] = (sales_stats['报名金额'] / sales_stats['是否报名']).fillna(0).round(2)
+        sales_stats['高质量线索率'] = (sales_stats['客户分级'] / sales_stats['学员id'] * 100).round(2)
+        
+        # 计算处理效率指标（跟进天数越少越好，回访次数适中最好）
+        sales_stats['跟进效率'] = (1 / (sales_stats['跟进天数'] + 1) * 100).round(2)  # 转换为正向指标
+        sales_stats['回访效率'] = (100 - abs(sales_stats['回访次数'] - 3) * 10).clip(0, 100).round(2)  # 3次回访为最佳
+        
+        # 计算优先级评分 (满分100分)
+        # 转化率35%，客单价25%，跟进效率20%，回访效率10%，高质量线索率10%
+        max_conversion = sales_stats['转化率'].max() if sales_stats['转化率'].max() > 0 else 1
+        max_price = sales_stats['平均客单价'].max() if sales_stats['平均客单价'].max() > 0 else 1
+        max_follow_eff = sales_stats['跟进效率'].max() if sales_stats['跟进效率'].max() > 0 else 1
+        max_call_eff = sales_stats['回访效率'].max() if sales_stats['回访效率'].max() > 0 else 1
+        max_quality = sales_stats['高质量线索率'].max() if sales_stats['高质量线索率'].max() > 0 else 1
+        
+        sales_stats['优先级评分'] = (
+            (sales_stats['转化率'] / max_conversion * 35) +
+            (sales_stats['平均客单价'] / max_price * 25) +
+            (sales_stats['跟进效率'] / max_follow_eff * 20) +
+            (sales_stats['回访效率'] / max_call_eff * 10) +
+            (sales_stats['高质量线索率'] / max_quality * 10)
+        ).round(1)
+        
+        # 重命名列
+        sales_stats.columns = ['分配线索数', '报名数', '总收入', '平均回访次数', '平均跟进天数', '高质量线索数',
+                              '转化率(%)', '平均客单价', '高质量线索率(%)', '跟进效率', '回访效率', '优先级评分']
+        
+        return sales_stats.sort_values('优先级评分', ascending=False)
+    
+    def get_sales_channel_match(self):
+        """分析销售-渠道匹配度"""
+        if self.data is None:
+            return pd.DataFrame()
+        
+        # 计算每个销售在每个渠道的表现
+        sales_channel_performance = []
+        
+        for sales in self.data['所属销售'].unique():
+            sales_data = self.data[self.data['所属销售'] == sales]
+            
+            for channel in sales_data['学员来源'].unique():
+                channel_data = sales_data[sales_data['学员来源'] == channel]
+                
+                if len(channel_data) >= 5:  # 至少5个线索才有统计意义
+                    conversion_rate = (channel_data['是否报名'].sum() / len(channel_data) * 100)
+                    avg_revenue = channel_data['报名金额'].sum() / len(channel_data) if len(channel_data) > 0 else 0
+                    
+                    sales_channel_performance.append({
+                        '销售人员': sales,
+                        '渠道': channel,
+                        '线索数': len(channel_data),
+                        '转化率': round(conversion_rate, 2),
+                        '平均收入': round(avg_revenue, 2)
+                    })
+        
+        if not sales_channel_performance:
+            return pd.DataFrame()
+        
+        performance_df = pd.DataFrame(sales_channel_performance)
+        
+        # 计算匹配度评分
+        performance_df['匹配度评分'] = (
+            performance_df['转化率'] * 0.6 + 
+            (performance_df['平均收入'] / performance_df['平均收入'].max() * 100) * 0.4
+        ).round(1)
+        
+        return performance_df.sort_values('匹配度评分', ascending=False)
 
 def show_overview(analyzer):
     """显示总体概览"""
@@ -850,6 +941,209 @@ def show_sales_team_analysis(analyzer):
             labels={'平均跟进天数': '平均跟进天数', '转化率(%)': '转化率(%)'}
         )
         st.plotly_chart(fig, use_container_width=True)
+    
+    # 销售人员优先级评分
+    st.subheader("🎯 销售人员优先级评分")
+    st.markdown("基于转化率、客单价、跟进效率、回访效率等多维度计算销售优先级评分")
+    
+    sales_priority_data = analyzer.calculate_sales_priority()
+    
+    if not sales_priority_data.empty:
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # 显示优先级评分表
+            display_cols = ['分配线索数', '转化率(%)', '平均客单价', '跟进效率', '回访效率', '优先级评分']
+            st.dataframe(sales_priority_data[display_cols], use_container_width=True)
+        
+        with col2:
+            # 销售优先级分布
+            def get_sales_priority_level(score):
+                if score >= 70:
+                    return "优秀销售 (≥70分)"
+                elif score >= 50:
+                    return "良好销售 (50-70分)"
+                else:
+                    return "待提升销售 (<50分)"
+            
+            sales_priority_levels = sales_priority_data['优先级评分'].apply(get_sales_priority_level).value_counts()
+            
+            fig = px.pie(
+                values=sales_priority_levels.values,
+                names=sales_priority_levels.index,
+                title="销售人员优先级分布",
+                color_discrete_map={
+                    "优秀销售 (≥70分)": "#2E8B57",
+                    "良好销售 (50-70分)": "#FFD700", 
+                    "待提升销售 (<50分)": "#DC143C"
+                }
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # TOP5销售多维度雷达图
+        st.subheader("📊 TOP5销售多维度能力对比")
+        
+        top5_sales = sales_priority_data.head(5)
+        
+        if len(top5_sales) > 0:
+            # 创建雷达图数据
+            categories = ['转化率', '客单价', '跟进效率', '回访效率', '线索质量']
+            
+            fig = go.Figure()
+            
+            colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7']
+            
+            for i, (sales, row) in enumerate(top5_sales.iterrows()):
+                # 标准化数据到0-100范围
+                values = [
+                    min(row['转化率(%)'] * 5, 100),  # 转化率*5
+                    min(row['平均客单价'] / 100, 100),  # 客单价/100
+                    row['跟进效率'],
+                    row['回访效率'],
+                    row['高质量线索率(%)']
+                ]
+                
+                fig.add_trace(go.Scatterpolar(
+                    r=values,
+                    theta=categories,
+                    fill='toself',
+                    name=sales.split('-')[-1] if '-' in sales else sales,  # 简化显示名称
+                    line_color=colors[i % len(colors)]
+                ))
+            
+            fig.update_layout(
+                polar=dict(
+                    radialaxis=dict(
+                        visible=True,
+                        range=[0, 100]
+                    )),
+                showlegend=True,
+                title="TOP5销售多维度能力雷达图"
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+    
+    # 销售-渠道匹配度分析
+    st.subheader("🔗 销售-渠道匹配度分析")
+    st.markdown("分析每个销售在不同渠道的表现，找出最佳匹配组合")
+    
+    match_data = analyzer.get_sales_channel_match()
+    
+    if not match_data.empty:
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # 显示匹配度排行
+            st.markdown("**最佳销售-渠道匹配TOP20**")
+            st.dataframe(match_data.head(20), use_container_width=True)
+        
+        with col2:
+            # 选择销售查看其渠道匹配情况
+            sales_list = match_data['销售人员'].unique()
+            selected_sales = st.selectbox(
+                "选择销售查看渠道匹配:",
+                options=sales_list,
+                key="sales_match_select"
+            )
+            
+            if selected_sales:
+                sales_match = match_data[match_data['销售人员'] == selected_sales].sort_values('匹配度评分', ascending=False)
+                
+                fig = px.bar(
+                    sales_match,
+                    x='渠道',
+                    y='匹配度评分',
+                    title=f"{selected_sales.split('-')[-1]} 渠道匹配度",
+                    color='匹配度评分',
+                    color_continuous_scale='viridis'
+                )
+                fig.update_xaxes(tickangle=45)
+                st.plotly_chart(fig, use_container_width=True)
+        
+        # 匹配度热力图
+        st.subheader("🔥 销售-渠道匹配度热力图")
+        
+        # 创建透视表
+        pivot_data = match_data.pivot_table(
+            index='销售人员',
+            columns='渠道',
+            values='匹配度评分',
+            fill_value=0
+        )
+        
+        # 只显示TOP10销售和TOP5渠道
+        top_sales = match_data.groupby('销售人员')['匹配度评分'].max().nlargest(10).index
+        top_channels = match_data.groupby('渠道')['匹配度评分'].max().nlargest(5).index
+        
+        filtered_pivot = pivot_data.loc[
+            [s for s in top_sales if s in pivot_data.index],
+            [c for c in top_channels if c in pivot_data.columns]
+        ]
+        
+        if not filtered_pivot.empty:
+            fig = px.imshow(
+                filtered_pivot.values,
+                x=filtered_pivot.columns,
+                y=[name.split('-')[-1] if '-' in name else name for name in filtered_pivot.index],
+                aspect="auto",
+                title="销售-渠道匹配度热力图 (TOP10销售 × TOP5渠道)",
+                labels=dict(x="渠道", y="销售人员", color="匹配度评分"),
+                color_continuous_scale='RdYlGn'
+            )
+            fig.update_xaxes(tickangle=45)
+            st.plotly_chart(fig, use_container_width=True)
+    
+    # 销售培训建议
+    st.subheader("📚 销售培训建议")
+    
+    if not sales_priority_data.empty:
+        # 分析需要培训的销售
+        low_performance_sales = sales_priority_data[sales_priority_data['优先级评分'] < 50]
+        
+        if not low_performance_sales.empty:
+            st.markdown("**需要重点关注的销售人员：**")
+            
+            for sales, row in low_performance_sales.iterrows():
+                suggestions = []
+                
+                if row['转化率(%)'] < 1.0:
+                    suggestions.append("转化技巧培训")
+                
+                if row['跟进效率'] < 50:
+                    suggestions.append("时间管理培训")
+                
+                if row['回访效率'] < 60:
+                    suggestions.append("客户沟通培训")
+                
+                if row['高质量线索率(%)'] < 20:
+                    suggestions.append("线索识别培训")
+                
+                if suggestions:
+                    st.markdown(f"- **{sales.split('-')[-1] if '-' in sales else sales}**: {', '.join(suggestions)}")
+        
+        # 优秀销售经验分享
+        top_performance_sales = sales_priority_data[sales_priority_data['优先级评分'] >= 70]
+        
+        if not top_performance_sales.empty:
+            st.markdown("**优秀销售经验可供学习：**")
+            
+            for sales, row in top_performance_sales.head(3).iterrows():
+                strengths = []
+                
+                if row['转化率(%)'] >= 2.0:
+                    strengths.append(f"转化率{row['转化率(%)']}%")
+                
+                if row['跟进效率'] >= 80:
+                    strengths.append("跟进高效")
+                
+                if row['回访效率'] >= 80:
+                    strengths.append("沟通优秀")
+                
+                if strengths:
+                    st.markdown(f"- **{sales.split('-')[-1] if '-' in sales else sales}**: {', '.join(strengths)}")
+    
+    else:
+        st.info("数据量不足，无法进行销售优先级分析（需要每个销售至少10个线索）")
 
 def show_time_trend_analysis(analyzer):
     """时间趋势分析"""
