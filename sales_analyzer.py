@@ -198,6 +198,192 @@ def show_overview(analyzer):
         )
         fig.update_layout(yaxis={'categoryorder':'total ascending'})
         st.plotly_chart(fig, use_container_width=True)
+    
+    # 渠道优先级统计
+    st.subheader("🎯 渠道优先级统计")
+    
+    priority_data = analyzer.calculate_channel_priority()
+    
+    if not priority_data.empty:
+        # 定义优先级分级函数
+        def get_priority_level(score):
+            if score >= 70:
+                return "高优先级"
+            elif score >= 50:
+                return "中优先级"
+            else:
+                return "低优先级"
+        
+        # 计算各优先级的统计数据
+        priority_data['优先级等级'] = priority_data['优先级评分'].apply(get_priority_level)
+        
+        priority_summary = priority_data.groupby('优先级等级').agg({
+            '线索数': 'sum',
+            '报名数': 'sum',
+            '总收入': 'sum',
+            '转化率(%)': 'mean'
+        }).round(2)
+        
+        # 计算各优先级的渠道数量
+        priority_counts = priority_data['优先级等级'].value_counts()
+        priority_summary['渠道数量'] = priority_counts
+        priority_summary['平均转化率(%)'] = priority_summary['转化率(%)']
+        
+        # 重新排列列顺序
+        priority_summary = priority_summary[['渠道数量', '线索数', '报名数', '总收入', '平均转化率(%)']]
+        
+        # 按优先级排序
+        priority_order = ['高优先级', '中优先级', '低优先级']
+        priority_summary = priority_summary.reindex([p for p in priority_order if p in priority_summary.index])
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # 优先级分布统计表
+            st.markdown("**优先级分布统计**")
+            st.dataframe(priority_summary, use_container_width=True)
+        
+        with col2:
+            # 优先级渠道数量分布
+            fig = px.pie(
+                values=priority_counts.values,
+                names=priority_counts.index,
+                title="渠道优先级分布",
+                color_discrete_map={
+                    "高优先级": "#2E8B57",
+                    "中优先级": "#FFD700", 
+                    "低优先级": "#DC143C"
+                }
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col3:
+            # 各优先级转化率对比
+            fig = px.bar(
+                x=priority_summary.index,
+                y=priority_summary['平均转化率(%)'],
+                title="各优先级平均转化率",
+                color=priority_summary.index,
+                color_discrete_map={
+                    "高优先级": "#2E8B57",
+                    "中优先级": "#FFD700", 
+                    "低优先级": "#DC143C"
+                }
+            )
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # 优先级趋势分析
+        st.subheader("📈 优先级资源分配分析")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # 线索数量分配
+            fig = px.bar(
+                x=priority_summary.index,
+                y=priority_summary['线索数'],
+                title="各优先级线索数量分配",
+                color=priority_summary.index,
+                color_discrete_map={
+                    "高优先级": "#2E8B57",
+                    "中优先级": "#FFD700", 
+                    "低优先级": "#DC143C"
+                }
+            )
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # 收入贡献分配
+            fig = px.bar(
+                x=priority_summary.index,
+                y=priority_summary['总收入'],
+                title="各优先级收入贡献",
+                color=priority_summary.index,
+                color_discrete_map={
+                    "高优先级": "#2E8B57",
+                    "中优先级": "#FFD700", 
+                    "低优先级": "#DC143C"
+                }
+            )
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # 关键指标卡片
+        st.subheader("🔑 关键优先级指标")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        high_priority = priority_summary.loc['高优先级'] if '高优先级' in priority_summary.index else None
+        total_channels = len(priority_data)
+        total_leads = priority_summary['线索数'].sum()
+        total_revenue = priority_summary['总收入'].sum()
+        
+        with col1:
+            high_channel_count = high_priority['渠道数量'] if high_priority is not None else 0
+            high_channel_pct = (high_channel_count / total_channels * 100) if total_channels > 0 else 0
+            st.metric(
+                "高优先级渠道", 
+                f"{high_channel_count}个",
+                f"{high_channel_pct:.1f}% 占比"
+            )
+        
+        with col2:
+            high_leads = high_priority['线索数'] if high_priority is not None else 0
+            high_leads_pct = (high_leads / total_leads * 100) if total_leads > 0 else 0
+            st.metric(
+                "高优先级线索", 
+                f"{high_leads:,.0f}条",
+                f"{high_leads_pct:.1f}% 占比"
+            )
+        
+        with col3:
+            high_revenue = high_priority['总收入'] if high_priority is not None else 0
+            high_revenue_pct = (high_revenue / total_revenue * 100) if total_revenue > 0 else 0
+            st.metric(
+                "高优先级收入", 
+                f"¥{high_revenue:,.0f}",
+                f"{high_revenue_pct:.1f}% 占比"
+            )
+        
+        with col4:
+            high_conversion = high_priority['平均转化率(%)'] if high_priority is not None else 0
+            avg_conversion = priority_summary['平均转化率(%)'].mean()
+            conversion_diff = high_conversion - avg_conversion
+            st.metric(
+                "高优先级转化率", 
+                f"{high_conversion:.2f}%",
+                f"+{conversion_diff:.2f}% vs平均"
+            )
+        
+        # 优化建议
+        st.subheader("💡 优化建议")
+        
+        if high_priority is not None:
+            high_leads_ratio = high_leads / total_leads if total_leads > 0 else 0
+            high_revenue_ratio = high_revenue / total_revenue if total_revenue > 0 else 0
+            
+            suggestions = []
+            
+            if high_leads_ratio < 0.5:
+                suggestions.append("🔄 **资源重分配**: 高优先级渠道线索占比偏低，建议增加高优先级渠道的线索分配")
+            
+            if high_revenue_ratio > 0.7:
+                suggestions.append("⭐ **效果优秀**: 高优先级渠道贡献了大部分收入，策略执行良好")
+            
+            if len(priority_data[priority_data['优先级等级'] == '低优先级']) > 0:
+                low_priority_channels = priority_data[priority_data['优先级等级'] == '低优先级'].index.tolist()
+                suggestions.append(f"⚠️ **关注低效渠道**: {', '.join(low_priority_channels[:3])} 等渠道需要优化或减少投入")
+            
+            if conversion_diff > 1:
+                suggestions.append("📈 **扩大优势**: 高优先级渠道转化率显著高于平均水平，建议加大投入")
+            
+            for suggestion in suggestions:
+                st.markdown(suggestion)
+        
+        else:
+            st.info("暂无高优先级渠道，建议优化现有渠道策略")
 
 def show_lead_quality_analysis(analyzer):
     """线索质量分析"""
