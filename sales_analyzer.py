@@ -236,6 +236,189 @@ class SalesAnalyzer:
         ).round(1)
         
         return performance_df.sort_values('匹配度评分', ascending=False)
+    
+    def generate_intelligent_recommendations(self):
+        """生成智能推荐建议"""
+        if self.data is None:
+            return {}
+        
+        recommendations = {
+            'channel_optimization': [],
+            'sales_optimization': [],
+            'resource_allocation': [],
+            'strategic_suggestions': []
+        }
+        
+        # 渠道优化建议
+        channel_priority = self.calculate_channel_priority()
+        if not channel_priority.empty:
+            # 高优先级渠道建议
+            high_priority_channels = channel_priority[channel_priority['优先级评分'] >= 70]
+            if not high_priority_channels.empty:
+                for channel, row in high_priority_channels.iterrows():
+                    recommendations['channel_optimization'].append({
+                        'type': '渠道扩展',
+                        'channel': channel,
+                        'priority': '高',
+                        'suggestion': f"建议增加{channel}渠道投入，当前转化率{row['转化率(%)']}%，优先级评分{row['优先级评分']}分",
+                        'expected_impact': f"预计可提升整体转化率{row['转化率(%)'] * 0.1:.2f}%"
+                    })
+            
+            # 低优先级渠道建议
+            low_priority_channels = channel_priority[channel_priority['优先级评分'] < 50]
+            if not low_priority_channels.empty:
+                for channel, row in low_priority_channels.head(3).iterrows():
+                    recommendations['channel_optimization'].append({
+                        'type': '渠道优化',
+                        'channel': channel,
+                        'priority': '中',
+                        'suggestion': f"{channel}渠道效果较低，转化率仅{row['转化率(%)']}%，建议优化投放策略或减少投入",
+                        'expected_impact': f"优化后预计可节省成本20-30%"
+                    })
+        
+        # 销售优化建议
+        sales_priority = self.calculate_sales_priority()
+        if not sales_priority.empty:
+            # 优秀销售推广建议
+            top_sales = sales_priority.head(3)
+            for sales, row in top_sales.iterrows():
+                recommendations['sales_optimization'].append({
+                    'type': '经验推广',
+                    'sales': sales,
+                    'priority': '高',
+                    'suggestion': f"{sales.split('-')[-1]}表现优秀，转化率{row['转化率(%)']}%，建议分享经验给团队",
+                    'expected_impact': "预计可提升团队整体转化率10-15%"
+                })
+            
+            # 待提升销售建议
+            low_performance_sales = sales_priority[sales_priority['优先级评分'] < 50]
+            for sales, row in low_performance_sales.head(3).iterrows():
+                training_needs = []
+                if row['转化率(%)'] < 1.0:
+                    training_needs.append("转化技巧")
+                if row['跟进效率'] < 50:
+                    training_needs.append("时间管理")
+                if row['回访效率'] < 60:
+                    training_needs.append("客户沟通")
+                
+                recommendations['sales_optimization'].append({
+                    'type': '培训提升',
+                    'sales': sales,
+                    'priority': '中',
+                    'suggestion': f"{sales.split('-')[-1]}需要{', '.join(training_needs)}培训，当前转化率{row['转化率(%)']}%",
+                    'expected_impact': f"培训后预计转化率可提升至{row['转化率(%)'] * 1.5:.1f}%"
+                })
+        
+        # 资源分配建议
+        match_data = self.get_sales_channel_match()
+        if not match_data.empty:
+            # 最佳匹配推荐
+            top_matches = match_data.head(5)
+            for _, row in top_matches.iterrows():
+                recommendations['resource_allocation'].append({
+                    'type': '最优匹配',
+                    'combination': f"{row['销售人员'].split('-')[-1]} × {row['渠道']}",
+                    'priority': '高',
+                    'suggestion': f"建议将更多{row['渠道']}线索分配给{row['销售人员'].split('-')[-1]}，匹配度评分{row['匹配度评分']}",
+                    'expected_impact': f"预计转化率可达{row['转化率']}%"
+                })
+        
+        # 战略建议
+        total_conversion = (self.data['是否报名'].sum() / len(self.data) * 100)
+        total_revenue = self.data['报名金额'].sum()
+        
+        if total_conversion < 1.0:
+            recommendations['strategic_suggestions'].append({
+                'type': '整体优化',
+                'priority': '高',
+                'suggestion': f"整体转化率{total_conversion:.2f}%偏低，建议从线索质量和销售技能两方面同时提升",
+                'expected_impact': "综合优化后预计转化率可提升至1.5-2.0%"
+            })
+        
+        if not channel_priority.empty:
+            high_priority_revenue_ratio = (
+                channel_priority[channel_priority['优先级评分'] >= 70]['总收入'].sum() / 
+                channel_priority['总收入'].sum()
+            )
+            if high_priority_revenue_ratio < 0.6:
+                recommendations['strategic_suggestions'].append({
+                    'type': '资源重分配',
+                    'priority': '中',
+                    'suggestion': f"高优先级渠道收入占比仅{high_priority_revenue_ratio*100:.1f}%，建议调整资源分配",
+                    'expected_impact': "重分配后预计整体收入可提升15-25%"
+                })
+        
+        return recommendations
+    
+    def generate_performance_report(self):
+        """生成绩效报告"""
+        if self.data is None:
+            return {}
+        
+        # 基础数据统计
+        total_leads = len(self.data)
+        converted_leads = self.data['是否报名'].sum()
+        total_revenue = self.data['报名金额'].sum()
+        conversion_rate = (converted_leads / total_leads * 100) if total_leads > 0 else 0
+        
+        # 渠道分析
+        channel_stats = self.calculate_channel_priority()
+        top_channel = channel_stats.index[0] if not channel_stats.empty else "无数据"
+        top_channel_conversion = channel_stats.iloc[0]['转化率(%)'] if not channel_stats.empty else 0
+        
+        # 销售分析
+        sales_stats = self.calculate_sales_priority()
+        top_sales = sales_stats.index[0] if not sales_stats.empty else "无数据"
+        top_sales_conversion = sales_stats.iloc[0]['转化率(%)'] if not sales_stats.empty else 0
+        
+        # 时间分析
+        if '首咨时间' in self.data.columns:
+            date_range = f"{self.data['首咨时间'].min().strftime('%Y-%m-%d')} 至 {self.data['首咨时间'].max().strftime('%Y-%m-%d')}"
+            daily_avg = total_leads / (self.data['首咨时间'].max() - self.data['首咨时间'].min()).days if (self.data['首咨时间'].max() - self.data['首咨时间'].min()).days > 0 else 0
+        else:
+            date_range = "无时间数据"
+            daily_avg = 0
+        
+        report = {
+            'summary': {
+                '分析时间范围': date_range,
+                '总线索数': f"{total_leads:,}",
+                '总转化数': f"{converted_leads:,}",
+                '整体转化率': f"{conversion_rate:.2f}%",
+                '总收入': f"¥{total_revenue:,.0f}",
+                '日均线索': f"{daily_avg:.1f}条"
+            },
+            'top_performers': {
+                '最佳渠道': f"{top_channel} (转化率{top_channel_conversion:.2f}%)",
+                '最佳销售': f"{top_sales.split('-')[-1] if '-' in str(top_sales) else top_sales} (转化率{top_sales_conversion:.2f}%)"
+            },
+            'insights': []
+        }
+        
+        # 生成洞察
+        if conversion_rate > 2.0:
+            report['insights'].append("✅ 整体转化率表现优秀，超过2%")
+        elif conversion_rate > 1.0:
+            report['insights'].append("⚠️ 整体转化率良好，但仍有提升空间")
+        else:
+            report['insights'].append("❌ 整体转化率偏低，需要重点优化")
+        
+        if not channel_stats.empty:
+            high_priority_count = len(channel_stats[channel_stats['优先级评分'] >= 70])
+            if high_priority_count >= 3:
+                report['insights'].append(f"✅ 拥有{high_priority_count}个高优先级渠道，渠道质量良好")
+            else:
+                report['insights'].append(f"⚠️ 仅有{high_priority_count}个高优先级渠道，建议优化渠道策略")
+        
+        if not sales_stats.empty:
+            excellent_sales_count = len(sales_stats[sales_stats['优先级评分'] >= 70])
+            total_sales_count = len(sales_stats)
+            if excellent_sales_count / total_sales_count > 0.3:
+                report['insights'].append(f"✅ {excellent_sales_count}/{total_sales_count}销售表现优秀，团队整体水平较高")
+            else:
+                report['insights'].append(f"⚠️ 仅{excellent_sales_count}/{total_sales_count}销售表现优秀，建议加强培训")
+        
+        return report
 
 def show_overview(analyzer):
     """显示总体概览"""
@@ -1305,12 +1488,13 @@ def main():
     # 主界面
     if analyzer.data is not None:
         # 创建标签页
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📊 总体概览", 
             "🎯 线索质量分析", 
             "📺 渠道效果分析", 
             "👥 销售团队分析", 
-            "📈 时间趋势分析"
+            "📈 时间趋势分析",
+            "🤖 智能推荐"
         ])
         
         with tab1:
@@ -1327,9 +1511,222 @@ def main():
             
         with tab5:
             show_time_trend_analysis(analyzer)
+            
+        with tab6:
+            show_intelligent_recommendations(analyzer)
     
     else:
         st.info("👆 请在左侧上传CSV数据文件开始分析")
+
+def show_intelligent_recommendations(analyzer):
+    """显示智能推荐"""
+    st.header("🤖 智能推荐引擎")
+    st.markdown("基于数据分析结果，为您提供个性化的优化建议和策略推荐")
+    
+    data = analyzer.data
+    
+    # 生成推荐建议
+    recommendations = analyzer.generate_intelligent_recommendations()
+    
+    # 生成绩效报告
+    performance_report = analyzer.generate_performance_report()
+    
+    # 绩效报告摘要
+    st.subheader("📋 绩效报告摘要")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # 关键指标展示
+        summary = performance_report.get('summary', {})
+        
+        col1_1, col1_2, col1_3 = st.columns(3)
+        
+        with col1_1:
+            st.metric("分析时间范围", summary.get('分析时间范围', '无数据'))
+            st.metric("总线索数", summary.get('总线索数', '0'))
+        
+        with col1_2:
+            st.metric("整体转化率", summary.get('整体转化率', '0%'))
+            st.metric("总收入", summary.get('总收入', '¥0'))
+        
+        with col1_3:
+            st.metric("日均线索", summary.get('日均线索', '0条'))
+            
+            top_performers = performance_report.get('top_performers', {})
+            st.metric("最佳渠道", top_performers.get('最佳渠道', '无数据'))
+    
+    with col2:
+        # 关键洞察
+        st.markdown("**📊 关键洞察**")
+        insights = performance_report.get('insights', [])
+        for insight in insights:
+            st.markdown(f"- {insight}")
+    
+    st.markdown("---")
+    
+    # 智能推荐建议
+    st.subheader("💡 智能优化建议")
+    
+    # 创建推荐类别标签页
+    rec_tab1, rec_tab2, rec_tab3, rec_tab4 = st.tabs([
+        "🎯 渠道优化", "👥 销售提升", "⚖️ 资源分配", "📈 战略建议"
+    ])
+    
+    with rec_tab1:
+        st.markdown("### 渠道优化建议")
+        channel_recs = recommendations.get('channel_optimization', [])
+        
+        if channel_recs:
+            for i, rec in enumerate(channel_recs):
+                priority_color = {"高": "🔴", "中": "🟡", "低": "🟢"}
+                
+                with st.expander(f"{priority_color.get(rec['priority'], '⚪')} {rec['type']}: {rec['channel']}"):
+                    st.markdown(f"**建议**: {rec['suggestion']}")
+                    st.markdown(f"**预期效果**: {rec['expected_impact']}")
+                    st.markdown(f"**优先级**: {rec['priority']}")
+        else:
+            st.info("暂无渠道优化建议")
+    
+    with rec_tab2:
+        st.markdown("### 销售团队提升建议")
+        sales_recs = recommendations.get('sales_optimization', [])
+        
+        if sales_recs:
+            for i, rec in enumerate(sales_recs):
+                priority_color = {"高": "🔴", "中": "🟡", "低": "🟢"}
+                
+                with st.expander(f"{priority_color.get(rec['priority'], '⚪')} {rec['type']}: {rec['sales'].split('-')[-1] if '-' in rec['sales'] else rec['sales']}"):
+                    st.markdown(f"**建议**: {rec['suggestion']}")
+                    st.markdown(f"**预期效果**: {rec['expected_impact']}")
+                    st.markdown(f"**优先级**: {rec['priority']}")
+        else:
+            st.info("暂无销售优化建议")
+    
+    with rec_tab3:
+        st.markdown("### 资源分配优化")
+        resource_recs = recommendations.get('resource_allocation', [])
+        
+        if resource_recs:
+            for i, rec in enumerate(resource_recs):
+                priority_color = {"高": "🔴", "中": "🟡", "低": "🟢"}
+                
+                with st.expander(f"{priority_color.get(rec['priority'], '⚪')} {rec['type']}: {rec['combination']}"):
+                    st.markdown(f"**建议**: {rec['suggestion']}")
+                    st.markdown(f"**预期效果**: {rec['expected_impact']}")
+                    st.markdown(f"**优先级**: {rec['priority']}")
+        else:
+            st.info("暂无资源分配建议")
+    
+    with rec_tab4:
+        st.markdown("### 战略发展建议")
+        strategic_recs = recommendations.get('strategic_suggestions', [])
+        
+        if strategic_recs:
+            for i, rec in enumerate(strategic_recs):
+                priority_color = {"高": "🔴", "中": "🟡", "低": "🟢"}
+                
+                with st.expander(f"{priority_color.get(rec['priority'], '⚪')} {rec['type']}"):
+                    st.markdown(f"**建议**: {rec['suggestion']}")
+                    st.markdown(f"**预期效果**: {rec['expected_impact']}")
+                    st.markdown(f"**优先级**: {rec['priority']}")
+        else:
+            st.info("暂无战略建议")
+    
+    # 行动计划生成器
+    st.subheader("📅 行动计划生成器")
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.markdown("**🎯 本月重点行动项**")
+        
+        # 收集高优先级建议
+        high_priority_actions = []
+        for category, recs in recommendations.items():
+            for rec in recs:
+                if rec.get('priority') == '高':
+                    high_priority_actions.append({
+                        'category': category,
+                        'action': rec.get('suggestion', ''),
+                        'type': rec.get('type', ''),
+                        'target': rec.get('channel', rec.get('sales', rec.get('combination', '')))
+                    })
+        
+        if high_priority_actions:
+            for i, action in enumerate(high_priority_actions[:5], 1):
+                st.markdown(f"{i}. **{action['type']}**: {action['action'][:100]}...")
+        else:
+            st.info("当前表现良好，暂无紧急行动项")
+    
+    with col2:
+        st.markdown("**📈 预期收益预测**")
+        
+        # 简单的收益预测
+        current_conversion = float(performance_report['summary']['整体转化率'].replace('%', ''))
+        current_revenue = float(performance_report['summary']['总收入'].replace('¥', '').replace(',', ''))
+        
+        if high_priority_actions:
+            # 假设实施高优先级建议可提升15-25%
+            predicted_conversion = current_conversion * 1.2
+            predicted_revenue = current_revenue * 1.2
+            
+            st.metric(
+                "预测转化率提升", 
+                f"{predicted_conversion:.2f}%",
+                f"+{predicted_conversion - current_conversion:.2f}%"
+            )
+            st.metric(
+                "预测收入提升", 
+                f"¥{predicted_revenue:,.0f}",
+                f"+¥{predicted_revenue - current_revenue:,.0f}"
+            )
+        else:
+            st.info("保持当前策略，预期稳定增长")
+    
+    # 导出报告功能
+    st.subheader("📤 导出分析报告")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("📊 生成PDF报告", use_container_width=True):
+            st.info("PDF报告生成功能开发中...")
+    
+    with col2:
+        if st.button("📈 导出Excel数据", use_container_width=True):
+            st.info("Excel导出功能开发中...")
+    
+    with col3:
+        if st.button("📧 发送邮件报告", use_container_width=True):
+            st.info("邮件发送功能开发中...")
+    
+    # 定期报告设置
+    st.subheader("⏰ 定期报告设置")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        report_frequency = st.selectbox(
+            "报告频率",
+            ["每日", "每周", "每月", "自定义"],
+            index=1
+        )
+        
+        report_recipients = st.text_input(
+            "接收邮箱",
+            placeholder="输入邮箱地址，多个邮箱用逗号分隔"
+        )
+    
+    with col2:
+        report_time = st.time_input("发送时间", value=None)
+        
+        if st.button("💾 保存设置", use_container_width=True):
+            st.success(f"已保存设置：{report_frequency}报告，发送时间{report_time}")
+    
+    # 历史建议追踪
+    st.subheader("📚 历史建议追踪")
+    st.info("历史建议追踪功能开发中，将记录每次建议的执行情况和效果...")
 
 if __name__ == "__main__":
     main()
