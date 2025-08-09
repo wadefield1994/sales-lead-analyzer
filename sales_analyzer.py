@@ -743,6 +743,17 @@ def show_channel_analysis(analyzer):
     
     data = analyzer.data
     
+    # 数据验证
+    if data is None or data.empty:
+        st.error("数据为空，无法进行渠道分析")
+        return
+    
+    required_columns = ['学员来源', '学员id', '是否报名', '报名金额']
+    missing_columns = [col for col in required_columns if col not in data.columns]
+    if missing_columns:
+        st.error(f"缺少必要字段: {missing_columns}")
+        return
+    
     # 渠道整体效果
     st.subheader("🎯 渠道整体效果对比")
     
@@ -983,13 +994,16 @@ def show_channel_analysis(analyzer):
         
         with col2:
             # 权重分配饼图
-            fig = px.pie(
-                values=weight_data['建议权重(%)'],
-                names=weight_data.index,
-                title="建议权重分配",
-                hover_data=['转化率(%)']
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            try:
+                fig = px.pie(
+                    values=weight_data['建议权重(%)'],
+                    names=weight_data.index,
+                    title="建议权重分配"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.error(f"权重分配图表错误: {str(e)}")
+                st.write("权重数据:", weight_data)
         
         # 权重调整对比
         st.subheader("📈 权重调整效果预测")
@@ -1063,6 +1077,17 @@ def show_sales_team_analysis(analyzer):
     st.header("👥 销售团队分析")
     
     data = analyzer.data
+    
+    # 数据验证
+    if data is None or data.empty:
+        st.error("数据为空，无法进行销售团队分析")
+        return
+    
+    required_columns = ['所属销售', '学员id', '是否报名']
+    missing_columns = [col for col in required_columns if col not in data.columns]
+    if missing_columns:
+        st.error(f"缺少必要字段: {missing_columns}")
+        return
     
     # 销售人员业绩排行
     st.subheader("🏆 销售人员业绩排行")
