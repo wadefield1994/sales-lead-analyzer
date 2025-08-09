@@ -68,6 +68,83 @@ class SalesAnalyzer:
             '总收入': f"¥{total_revenue:,.0f}" if pd.notna(total_revenue) else "¥0",
             '平均回访次数': f"{avg_follow_times:.1f}"
         }
+    
+    def calculate_channel_priority(self):
+        """计算渠道优先级评分"""
+        if self.data is None:
+            return pd.DataFrame()
+        
+        # 按渠道统计基础数据
+        channel_stats = self.data.groupby('学员来源').agg({
+            '学员id': 'count',
+            '是否报名': 'sum',
+            '报名金额': 'sum',
+            '回访次数': 'mean',
+            '客户分级': lambda x: (x.isin(['A', 'B'])).sum()  # 高质量线索数
+        }).round(2)
+        
+        # 计算各项指标
+        channel_stats['转化率'] = (channel_stats['是否报名'] / channel_stats['学员id'] * 100).round(2)
+        channel_stats['平均客单价'] = (channel_stats['报名金额'] / channel_stats['是否报名']).fillna(0).round(2)
+        channel_stats['高质量线索率'] = (channel_stats['客户分级'] / channel_stats['学员id'] * 100).round(2)
+        
+        # 计算优先级评分 (满分100分)
+        # 转化率权重40%，平均客单价权重30%，高质量线索率权重20%，线索数量权重10%
+        max_conversion = channel_stats['转化率'].max() if channel_stats['转化率'].max() > 0 else 1
+        max_price = channel_stats['平均客单价'].max() if channel_stats['平均客单价'].max() > 0 else 1
+        max_quality = channel_stats['高质量线索率'].max() if channel_stats['高质量线索率'].max() > 0 else 1
+        max_leads = channel_stats['学员id'].max() if channel_stats['学员id'].max() > 0 else 1
+        
+        channel_stats['优先级评分'] = (
+            (channel_stats['转化率'] / max_conversion * 40) +
+            (channel_stats['平均客单价'] / max_price * 30) +
+            (channel_stats['高质量线索率'] / max_quality * 20) +
+            (channel_stats['学员id'] / max_leads * 10)
+        ).round(1)
+        
+        # 重命名列
+        channel_stats.columns = ['线索数', '报名数', '总收入', '平均回访次数', '高质量线索数', 
+                               '转化率(%)', '平均客单价', '高质量线索率(%)', '优先级评分']
+        
+        return channel_stats.sort_values('优先级评分', ascending=False)
+    
+    def calculate_channel_weights(self):
+        """计算渠道权重分配"""
+        if self.data is None:
+            return pd.DataFrame()
+        
+        # 获取渠道统计数据
+        channel_stats = self.data.groupby('学员来源').agg({
+            '学员id': 'count',
+            '是否报名': 'sum',
+            '报名金额': 'sum'
+        })
+        
+        # 计算转化率
+        channel_stats['转化率'] = (channel_stats['是否报名'] / channel_stats['学员id'] * 100).round(2)
+        
+        # 计算权重分配（基于转化率）
+        total_conversion_rate = channel_stats['转化率'].sum()
+        if total_conversion_rate > 0:
+            channel_stats['建议权重(%)'] = (channel_stats['转化率'] / total_conversion_rate * 100).round(1)
+        else:
+            channel_stats['建议权重(%)'] = 0
+        
+        # 生成调整建议
+        def get_adjustment_advice(row):
+            if row['转化率'] >= 1.0:
+                return f"高效渠道，建议增加投入 (转化率{row['转化率']}%)"
+            elif row['转化率'] >= 0.5:
+                return f"中等效果，保持现状 (转化率{row['转化率']}%)"
+            else:
+                return f"效果较低，建议优化或减少投入 (转化率{row['转化率']}%)"
+        
+        channel_stats['调整建议'] = channel_stats.apply(get_adjustment_advice, axis=1)
+        
+        # 重命名列
+        channel_stats.columns = ['线索数', '报名数', '总收入', '转化率(%)', '建议权重(%)', '调整建议']
+        
+        return channel_stats.sort_values('建议权重(%)', ascending=False)
 
 def show_overview(analyzer):
     """显示总体概览"""
@@ -344,6 +421,174 @@ def show_channel_analysis(analyzer):
                 )
                 fig.update_xaxes(tickangle=45)
                 st.plotly_chart(fig, use_container_width=True)
+    
+    # 渠道优先级排序分析
+    st.subheader("🎯 渠道优先级排序")
+    st.markdown("基于转化率、客单价、线索质量等多维度计算渠道优先级评分")
+    
+    priority_data = analyzer.calculate_channel_priority()
+    
+    if not priority_data.empty:
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # 显示优先级排序表
+            st.dataframe(priority_data, use_container_width=True)
+        
+        with col2:
+            # 优先级分布饼图
+            def get_priority_level(score):
+                if score >= 70:
+                    return "高优先级 (≥70分)"
+                elif score >= 50:
+                    return "中优先级 (50-70分)"
+                else:
+                    return "低优先级 (<50分)"
+            
+            priority_levels = priority_data['优先级评分'].apply(get_priority_level).value_counts()
+            
+            fig = px.pie(
+                values=priority_levels.values,
+                names=priority_levels.index,
+                title="渠道优先级分布",
+                color_discrete_map={
+                    "高优先级 (≥70分)": "#2E8B57",
+                    "中优先级 (50-70分)": "#FFD700", 
+                    "低优先级 (<50分)": "#DC143C"
+                }
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # 优先级评分雷达图
+        st.subheader("📊 TOP5渠道多维度对比")
+        
+        top5_channels = priority_data.head(5)
+        
+        if len(top5_channels) > 0:
+            # 创建雷达图数据
+            categories = ['转化率(%)', '平均客单价', '高质量线索率(%)', '线索数']
+            
+            fig = go.Figure()
+            
+            colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7']
+            
+            for i, (channel, row) in enumerate(top5_channels.iterrows()):
+                # 标准化数据到0-100范围
+                values = [
+                    min(row['转化率(%)'] * 20, 100),  # 转化率*20
+                    min(row['平均客单价'] / 100, 100),  # 客单价/100
+                    row['高质量线索率(%)'],
+                    min(row['线索数'] / top5_channels['线索数'].max() * 100, 100)  # 线索数标准化
+                ]
+                
+                fig.add_trace(go.Scatterpolar(
+                    r=values,
+                    theta=categories,
+                    fill='toself',
+                    name=channel,
+                    line_color=colors[i % len(colors)]
+                ))
+            
+            fig.update_layout(
+                polar=dict(
+                    radialaxis=dict(
+                        visible=True,
+                        range=[0, 100]
+                    )),
+                showlegend=True,
+                title="TOP5渠道多维度对比雷达图"
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+    
+    # 智能权重分配
+    st.subheader("⚖️ 智能权重分配建议")
+    st.markdown("基于转化率数据自动计算最优权重分配方案")
+    
+    weight_data = analyzer.calculate_channel_weights()
+    
+    if not weight_data.empty:
+        col1, col2 = st.columns([3, 2])
+        
+        with col1:
+            st.dataframe(weight_data, use_container_width=True)
+        
+        with col2:
+            # 权重分配饼图
+            fig = px.pie(
+                values=weight_data['建议权重(%)'],
+                names=weight_data.index,
+                title="建议权重分配",
+                hover_data=['转化率(%)']
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # 权重调整对比
+        st.subheader("📈 权重调整效果预测")
+        
+        # 假设当前是平均分配
+        current_weight = 100 / len(weight_data)
+        weight_comparison = weight_data.copy()
+        weight_comparison['当前权重(%)'] = current_weight
+        weight_comparison['权重变化'] = weight_comparison['建议权重(%)'] - current_weight
+        weight_comparison['预期收益变化'] = (weight_comparison['权重变化'] * weight_comparison['转化率(%)'] / 100).round(2)
+        
+        # 显示权重调整对比图
+        fig = go.Figure()
+        
+        fig.add_trace(go.Bar(
+            name='当前权重',
+            x=weight_comparison.index,
+            y=weight_comparison['当前权重(%)'],
+            marker_color='lightblue'
+        ))
+        
+        fig.add_trace(go.Bar(
+            name='建议权重',
+            x=weight_comparison.index,
+            y=weight_comparison['建议权重(%)'],
+            marker_color='darkblue'
+        ))
+        
+        fig.update_layout(
+            title='权重分配对比：当前 vs 建议',
+            xaxis_title='渠道',
+            yaxis_title='权重(%)',
+            barmode='group'
+        )
+        fig.update_xaxes(tickangle=45)
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # 显示调整建议摘要
+        st.subheader("💡 调整建议摘要")
+        
+        high_priority = weight_data[weight_data['转化率(%)'] >= 1.0]
+        low_priority = weight_data[weight_data['转化率(%)'] < 0.5]
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric(
+                "高效渠道数量", 
+                len(high_priority),
+                f"建议权重: {high_priority['建议权重(%)'].sum():.1f}%"
+            )
+        
+        with col2:
+            st.metric(
+                "低效渠道数量", 
+                len(low_priority),
+                f"建议权重: {low_priority['建议权重(%)'].sum():.1f}%"
+            )
+        
+        with col3:
+            total_improvement = weight_comparison['预期收益变化'].sum()
+            st.metric(
+                "预期收益提升", 
+                f"{total_improvement:.2f}%",
+                "基于权重调整"
+            )
 
 def show_sales_team_analysis(analyzer):
     """销售团队分析"""
